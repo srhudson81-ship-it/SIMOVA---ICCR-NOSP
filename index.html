@@ -181,6 +181,8 @@ const encMap=new Map(ROSTER.map(r=>[mat(r.CRACHA),r.NOME]));
 const panel=document.createElement('section');panel.id='adesaoBox';const main=document.querySelector('main');main.insertBefore(panel,document.getElementById('stats'));
 let details='todos';let periodo='periodo';let excluirOperadores=true;
 function draw(){
+ const currentRoster=window.ICCR_EMPLOYEE_ROSTER||ROSTER;
+ const currentManagers=currentRoster.some(r=>Object.prototype.hasOwnProperty.call(r,"FLAG_ENCARREGADO"))?currentRoster.filter(r=>String(r.FLAG_ENCARREGADO||"").trim()==="1"):(window.ICCR_FLAG_MANAGERS||FLAG_MANAGERS);
  const date=document.getElementById('date')?.value||'';periodo=date?'dia':'periodo';let datekey=keyDate(date);if(!datekey){let dates=DATA.filter(r=>r.tipo==='Mão de obra').map(r=>keyDate(r.data)).filter(Boolean).sort();datekey=dates[dates.length-1]||'';}
  const records=DATA.filter(r=>r.tipo==='Mão de obra'&&(periodo==='periodo'||keyDate(r.data)===datekey)); const allDates=DATA.filter(r=>r.tipo==='Mão de obra').map(r=>keyDate(r.data)).filter(Boolean).sort(); const startKey=periodo==='periodo'?(allDates[0]||datekey):datekey; const endKey=periodo==='periodo'?(allDates[allDates.length-1]||datekey):datekey;
  const eqRecords=DATA.filter(r=>r.tipo==='Equipamentos'&&(periodo==='periodo'||keyDate(r.data)===datekey));
@@ -189,12 +191,12 @@ function draw(){
  const byMat=new Set(records.map(r=>mat(r.mat)).filter(x=>x!=='0'));
  const byName=new Set(records.map(r=>norm(r.nome)));
  const encarregados=new Map();let demitidosExcluidos=0;
- for(let r of ROSTER){let adm=keyDate(r.DATA_ADMISSAO),dem=keyDate(r.DATA_DEMISSAO);if(!endKey||(adm&&adm>endKey)||(dem&&dem<=endKey)){if(dem&&dem<=endKey)demitidosExcluidos++;continue;}
+ for(let r of currentRoster){let adm=keyDate(r.DATA_ADMISSAO),dem=keyDate(r.DATA_DEMISSAO);if(!endKey||(adm&&adm>endKey)||(dem&&dem<=endKey)){if(dem&&dem<=endKey)demitidosExcluidos++;continue;}
  let id=mat(r.ENCARREGADO);if(!id||id==='0')continue;
  let k=mat(r.CRACHA);let operadorAutonomo=opMats.has(k)||(opNames.has(norm(r.NOME))&&norm(r.NOME).length>5);let obj=encarregados.get(id)||{id,nome:encMap.get(id)||'ENCARREGADO '+id,prev:0,ap:0,nomes:[],reg:0,operadores:0};if(operadorAutonomo&&excluirOperadores){obj.operadores++;encarregados.set(id,obj);continue;}let apontado=byMat.has(k)||byName.has(norm(r.NOME));obj.prev++;if(apontado)obj.ap++;else obj.nomes.push(r.NOME);encarregados.set(id,obj);}
  // Cadastro de encarregados: FLAG_ENCARREGADO = 1, mesmo sem subordinados vinculados.
  const flaggedIds=new Set();
- for(const r of FLAG_MANAGERS){
+ for(const r of currentManagers){
    const adm=keyDate(r.DATA_ADMISSAO),dem=keyDate(r.DATA_DEMISSAO);
    if((adm&&adm>endKey)||(dem&&dem<=endKey))continue;
    const id=mat(r.CRACHA);flaggedIds.add(id);
@@ -214,11 +216,22 @@ function draw(){
  }
  const groups=[...encarregados.values()].sort((a,b)=>b.prev-a.prev);let prev=groups.reduce((a,g)=>a+g.prev,0),ap=groups.reduce((a,g)=>a+g.ap,0),active=groups.filter(g=>g.reg>0),cov=active.reduce((a,g)=>a+g.prev,0),eligible=active.reduce((a,g)=>a+g.ap,0);
  const pct=(a,b)=>b?(100*a/b).toFixed(1).replace('.',',')+'%':'N/D';
+ // Mesma apuração da Visão Executiva: efetivo completo, ativo na data final,
+ // e colaboradores com matrícula presente no CSV de mão de obra.
+ const summaryActive=currentRoster.filter(r=>{const adm=keyDate(r.DATA_ADMISSAO),dem=keyDate(r.DATA_DEMISSAO);return (!adm||adm<=endKey)&&(!dem||dem>endKey)});
+ const summaryIds=new Set(summaryActive.map(r=>mat(r.CRACHA)).filter(x=>x!=='0'));
+ const summaryPeople=new Set(records.map(r=>mat(r.mat)).filter(x=>x!=='0'&&summaryIds.has(x)));
+ const summaryManagers=currentManagers.filter(r=>{const adm=keyDate(r.DATA_ADMISSAO),dem=keyDate(r.DATA_DEMISSAO);return (!adm||adm<=endKey)&&(!dem||dem>endKey)});
+ const summaryManagerIds=new Set(summaryManagers.map(r=>mat(r.CRACHA)));
+ const summaryManagerNames=new Map(summaryManagers.map(r=>[norm(r.NOME),mat(r.CRACHA)]));
+ const summaryMOManagers=new Set();
+ for(const r of records){const k=mat(r.encMat||r.enc_matricula||r.apontadorMat||r.apontador_matricula);if(summaryManagerIds.has(k))summaryMOManagers.add(k);const byName=summaryManagerNames.get(norm(r.enc));if(byName)summaryMOManagers.add(byName)}
+
  panel.innerHTML=`<h2>COBERTURA OBSERVADA — COLABORADOR × ENCARREGADO</h2><div style="font-size:12px;color:#5d7186">PERÍODO ANALISADO: ${startKey?startKey.slice(6)+'/'+startKey.slice(4,6)+'/'+startKey.slice(0,4):'—'} A ${endKey?endKey.slice(6)+'/'+endKey.slice(4,6)+'/'+endKey.slice(0,4):'—'} · EFETIVO DO CADASTRO IMPORTADO · CRUZAMENTO AUTOMÁTICO COM REGISTROS DE MÃO DE OBRA</div>
- <div class="ad-admin-controls" style="margin:12px 0;align-items:center;gap:12px;flex-wrap:wrap"><strong>JANELA DE ANÁLISE</strong><select id="adPeriodo"><option value="periodo">TODO O PERÍODO DOS CSVs</option><option value="dia">DATA SELECIONADA NO PAINEL</option></select><span style="font-size:11px;color:#526c88">O ÚLTIMO DIA PODE TER APONTAMENTOS PARCIAIS.</span></div><label class="ad-admin-controls" style="align-items:center;gap:8px;margin:8px 0;font-size:12px"><input type="checkbox" id="adExcludeOp" checked> EXCLUIR DA META DE MÃO DE OBRA OPERADORES COM REGISTRO NO RELATÓRIO DE EQUIPAMENTOS</label><div class="ad-cards"><div class="ad-card"><span>EFETIVO ATIVO ELEGÍVEL (SEM DEMITIDOS)</span><b>${prev}</b></div><div class="ad-card"><span>COLABORADORES APONTADOS</span><b>${ap}</b></div><div class="ad-card"><span>COBERTURA DE PESSOAS NO PERÍODO</span><b>${pct(ap,prev)}</b></div><div class="ad-card"><span>ENCARREGADOS COM REGISTROS (FLAG = 1)</span><b>${active.length} / ${groups.length}</b></div></div>
+ <div class="ad-admin-controls" style="margin:12px 0;align-items:center;gap:12px;flex-wrap:wrap"><strong>JANELA DE ANÁLISE</strong><select id="adPeriodo"><option value="periodo">TODO O PERÍODO DOS CSVs</option><option value="dia">DATA SELECIONADA NO PAINEL</option></select><span style="font-size:11px;color:#526c88">O ÚLTIMO DIA PODE TER APONTAMENTOS PARCIAIS.</span></div><label class="ad-admin-controls" style="align-items:center;gap:8px;margin:8px 0;font-size:12px"><input type="checkbox" id="adExcludeOp" checked> EXCLUIR DA META DE MÃO DE OBRA OPERADORES COM REGISTRO NO RELATÓRIO DE EQUIPAMENTOS</label><div class="ad-cards"><div class="ad-card"><span>COLABORADORES ATIVOS (MESMA BASE DA VISÃO EXECUTIVA)</span><b>${summaryIds.size}</b></div><div class="ad-card"><span>COLABORADORES APONTADOS</span><b>${summaryPeople.size}</b></div><div class="ad-card"><span>COBERTURA DE PESSOAS NO PERÍODO</span><b>${pct(summaryPeople.size,summaryIds.size)}</b></div><div class="ad-card"><span>ENCARREGADOS COM REGISTROS (FLAG = 1)</span><b>${summaryMOManagers.size} / ${summaryManagers.length}</b></div></div>
  <div class="ad-admin-controls" style="font-size:12px;color:#456583;margin:8px 0">DEMITIDOS EXCLUÍDOS DO EFETIVO NA DATA FINAL: <strong>${demitidosExcluidos}</strong>. OPERADORES IDENTIFICADOS NO RELATÓRIO DE EQUIPAMENTOS E RETIRADOS DA META: <strong>${excluirOperadores?groups.reduce((a,g)=>a+(g.operadores||0),0):0}</strong>. O REGISTRO DE EQUIPAMENTO É INDÍCIO DE APONTAMENTO AUTÔNOMO; NÃO COMPROVA POSSE DO CELULAR.</div><div class="ad-admin-controls" style="font-size:12px;background:#edf5ff;padding:12px;border-radius:9px;margin-bottom:12px">ADESÃO DOS VINCULADOS A ENCARREGADOS COM REGISTROS: <strong>${pct(eligible,cov)}</strong> (${eligible} / ${cov}). SEM REGISTRO DO ENCARREGADO NÃO SIGNIFICA, NECESSARIAMENTE, AUSÊNCIA DE CELULAR. INDICADOR BASEADO NO VÍNCULO CADASTRADO E NA EXISTÊNCIA DE APONTAMENTO DO COLABORADOR NO PERÍODO. NÃO CONFUNDIR AUSÊNCIA DE REGISTRO COM AUSÊNCIA DE CELULAR.</div>
  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0 8px"><strong>ADESÃO POR ENCARREGADO</strong><button id="adExport">EXPORTAR RESUMO CSV</button></div>
- <div class="ad-summary"><div><span>ADESÃO DOS ENCARREGADOS COM REGISTROS</span><strong>${pct(eligible,cov)}</strong><span>${eligible} DE ${cov} COLABORADORES</span></div><div><span>ENCARREGADOS COM REGISTROS / FLAG = 1</span><strong>${active.length} / ${groups.length}</strong><span>USO OBSERVADO NO PERÍODO</span></div><div><span>COLABORADORES SEM REGISTRO</span><strong>${Math.max(0,prev-ap)}</strong><span>DO EFETIVO ELEGÍVEL</span></div></div>
+ <div class="ad-summary"><div><span>COBERTURA DOS VINCULADOS A ENCARREGADOS COM REGISTROS</span><strong>${pct(eligible,cov)}</strong><span>${eligible} DE ${cov} COLABORADORES</span></div><div><span>ENCARREGADOS COM REGISTROS / FLAG = 1</span><strong>${summaryMOManagers.size} / ${summaryManagers.length}</strong><span>USO OBSERVADO NO PERÍODO</span></div><div><span>COLABORADORES SEM REGISTRO</span><strong>${Math.max(0,summaryIds.size-summaryPeople.size)}</strong><span>DO EFETIVO ELEGÍVEL</span></div></div>
  <div style="font-size:11px;color:#6b7890;margin-top:8px">ENCARREGADOS DESLIGADOS OU COM VÍNCULOS EM REVISÃO NÃO DEVEM SER INTERPRETADOS COMO FALHA DE APONTAMENTO. GENIVALDO: DESLIGAMENTO INFORMADO, DATA A VALIDAR; MANTIDO NA CONTAGEM DO CADASTRO ATÉ CORREÇÃO DA DATA. CLEITON: SEM CELULAR INFORMADO, APONTAMENTOS POR TERCEIROS A CONCILIAR.</div><div id="adRank"></div><details class="ad-detail" id="adAll"><summary>VER TODOS OS ENCARREGADOS E DETALHES</summary><div id="adRankRest"></div></details><details class="ad-detail"><summary>CONSULTAR DADOS DETALHADOS E CRITÉRIOS DE CÁLCULO</summary><div class="ad-scroll"><table><thead><tr><th>ENCARREGADO</th><th>VINCULADOS ELEGÍVEIS</th><th>OPERADORES EXCLUÍDOS</th><th>APONTADOS</th><th>ADESÃO</th><th>USO IDENTIFICADO</th><th>SEM APONTAMENTO</th></tr></thead><tbody id="adBody"></tbody></table></div><p style="font-size:11px;color:#667b91">COBERTURA OBSERVADA NO PERÍODO; NÃO COMPROVA POSSE DE CELULAR. VÍNCULOS CADASTRAIS E DATAS DE ADMISSÃO/DEMISSÃO DEVEM SER CONFERIDOS. A AUSÊNCIA DE REGISTRO NÃO COMPROVA FALHA DO ENCARREGADO.</p></details>`;
  function rows(){let g=groups;const ranked=g.filter(x=>x.prev>0).sort((a,b)=>(b.prev?b.ap/b.prev:0)-(a.prev?a.ap/a.prev:0));
  const card=x=>{let v=x.prev?100*x.ap/x.prev:0;let color=v>=85?'#16845b':v>=60?'#d09b2c':'#d64d54';let review=!!x.revisao;return `<div class="ad-rank-item"><div class="ad-rank-top"><span class="ad-rank-name" title="${x.nome.replaceAll('"','&quot;')}">${x.nome.replaceAll('<','&lt;')}</span><span class="ad-rank-pct" style="color:${review?'#a66b12':color}">${review?'EM ANÁLISE':pct(x.ap,x.prev)}</span></div><div class="ad-track"><div class="ad-fill" style="width:${Math.min(100,v)}%;background:${review?'#d09b2c':color}"></div></div><div class="ad-rank-meta">${review?'VÍNCULO A VALIDAR · APONTAMENTOS POR TERCEIROS INFORMADOS':`${x.ap} APONTADOS DE ${x.prev} ELEGÍVEIS · ${x.prev-x.ap} SEM REGISTRO`}</div></div>`};
@@ -242,7 +255,7 @@ function draw(){
    const selectedGroups=selected==='*'?groups:groups.filter(g=>g.id===selected);
    const ids=new Set(selectedGroups.map(g=>g.id));
    const items=[];
-   for(const r of ROSTER){
+   for(const r of currentRoster){
      const id=mat(r.ENCARREGADO);
      if(!ids.has(id))continue;
      const adm=keyDate(r.DATA_ADMISSAO),dem=keyDate(r.DATA_DEMISSAO);
@@ -333,8 +346,7 @@ function draw(){
  // Observe updates to data import and date filter, without changing original controls.
  document.getElementById('date')?.addEventListener('change',()=>setTimeout(draw,0));document.getElementById('clear')?.addEventListener('click',()=>setTimeout(draw,0));
  const oldApply=window.apply; // legacy lexical function is not overwritten
- const importButton=()=>document.getElementById('loadCsv')?.addEventListener('click',()=>setTimeout(draw,400));
- document.getElementById('navArquivos')?.addEventListener('click',()=>setTimeout(importButton,0));
+ window.addEventListener('iccr-data-updated',()=>setTimeout(draw,0));
  draw();
 })();
 </script><style>
