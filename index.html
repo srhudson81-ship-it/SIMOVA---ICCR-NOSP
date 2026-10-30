@@ -292,12 +292,18 @@ function gaOperator(r){
 }
 let gaDirectCostSource=null,gaDirectCostSet=new Set();
 function gaCostError(r){
+ // Erro: operador lançado na Mão de Obra em uma atividade direta que consta na Produção.
+ // Não classificar como erro apenas porque o centro de custo é utilizado na Produção.
+ if(!gaOperator(r))return false;
  const cost=norm(eqText(r,'Centro de Custo'));
- if(!cost||!gaOperator(r))return false;
- // Cache invalidado automaticamente quando a API de Produção é substituída.
+ const activity=norm(val(r,'activity'));
+ if(!cost||!activity)return false;
  const source=datasets('prod');
- if(gaDirectCostSource!==source){gaDirectCostSource=source;gaDirectCostSet=new Set(source.map(x=>norm(eqText(x,'Centro de Custo'))).filter(Boolean));}
- return gaDirectCostSet.has(cost);
+ if(gaDirectCostSource!==source){
+  gaDirectCostSource=source;
+  gaDirectCostSet=new Set(source.filter(x=>!gaIsEquipmentProduction(x)).map(x=>norm(eqText(x,'Centro de Custo'))+'|'+norm(val(x,'activity'))).filter(x=>!x.startsWith('|')&&!x.endsWith('|')));
+ }
+ return gaDirectCostSet.has(cost+'|'+activity);
 }
 function gaCheck(r,cat){
  const issues=[];
